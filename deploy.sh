@@ -56,6 +56,29 @@ cleanup_deployment() {
     exit 0
 }
 
+# Check for cleanup flag
+if [ "${1:-}" = "--cleanup" ]; then
+    echo "========> Cleanup Mode Activated"
+    echo "This will remove all deployed resources from the remote server."
+    echo ""
+    read -p "Enter your Remote Server Address (IP/Hostname): " SERVER_ADDRESS
+    read -p "Enter your Remote Server Username: " SERVER_USER
+    read -p "Enter the path to your SSH key: " SSH_KEY_PATH
+    
+    # Validate SSH connection for cleanup
+    if [ ! -f "$SSH_KEY_PATH" ]; then
+        log_error "SSH key not found at: $SSH_KEY_PATH"
+        exit 2
+    fi
+    
+    ssh -i "$SSH_KEY_PATH" -o ConnectTimeout=10 "$SERVER_USER@$SERVER_ADDRESS" "echo SSH_OK" 2>&1 >/dev/null
+    if [ "$?" -ne 0 ]; then
+        log_error "SSH connection failed. Cannot perform cleanup."
+        exit 3
+    fi
+    
+    cleanup_deployment
+fi
 
 echo "========> Let's get started with deployment!!!"
 echo "----------------"
@@ -65,6 +88,7 @@ echo "1. GitHub Repository URL- this is the URL of the repository with source co
 echo "2. Personal Access Token (PAT)- a token that allows access to your GitHub repository for a limited period of time."
 echo "3. Remote Server Address details- the IP address, the username and ssh key path (within local machine) of the remote server where the application will be deployed."
 echo "4. Application Port- the internal port of your dockerized application."
+echo "5. Private Key Path- the path to your SSH private key for authentication to the remote server. MUST BE ABSOLUTE!!"
 
 echo ""
 read -p "Enter your GitHub Repo URL: " REPO_URL
@@ -81,6 +105,8 @@ echo "Remote Server IP Address: $SERVER_ADDRESS"
 echo "Remote Server Username: $SERVER_USER"
 echo "SSH Key Path: $SSH_KEY_PATH"
 echo "Application Port: $APP_PORT" 
+
+PARENT_DIR=$(pwd)
 
 ### SSH connectivity dry-run
 ssh_dry_run() {
@@ -125,7 +151,7 @@ else
         REPO_PATH="${REPO_URL#https://github.com/}"
         NEW_REPO_URL="https://$PAT@github.com/$REPO_PATH.git"
     else
-        log_error "Invalid repository URL format. Please provide a full GitHub URL (https://github.com/owner/repo)"
+        log_error "Invalid repository URL format. Please provide a full GitHub URL!"
         exit 1
     fi
     
@@ -158,7 +184,6 @@ echo ""
 
 echo "=========> Test SSH Connection to Remote server with dry-run..."
 
-# Run SSH dry-run before remote operations
 ssh_dry_run
 
 echo "------> Add private key to ssh-agent..."
@@ -171,6 +196,13 @@ echo "----------------"
 echo ""
 
 log_info "Preparing environment on remote server..."
+log_info "Cleaning up any corrupted repository configurations..."
+ssh "$SERVER_USER@$SERVER_ADDRESS" "
+    # Remove any corrupted Docker repository files
+    sudo rm -f /etc/apt/sources.list.d/docker.list
+    sudo rm -f /etc/apt/sources.list.d/docker.list.save
+"
+
 log_info "Updating system packages..."
 ssh "$SERVER_USER@$SERVER_ADDRESS" "sudo apt-get update"
 log_success "System packages updated"
@@ -187,16 +219,14 @@ ssh "$SERVER_USER@$SERVER_ADDRESS" "
         sudo mkdir -p /etc/apt/keyrings
         sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc 
         sudo chmod a+r /etc/apt/keyrings/docker.asc
-        echo \
-        'deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-        \$(. /etc/os-release && echo \"\${UBUNTU_CODENAME:-\$VERSION_CODENAME}\") stable' | \
-        sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-        sudo apt-get update
+        echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \$(. /etc/os-release && echo \"\$VERSION_CODENAME\") stable\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
+        sudo apt-get update
         sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
         echo Docker and Docker-Compose installed successfully
         echo Docker Version: $(docker --version)
         echo Docker-Compose Version: $(docker compose version)
+
         sudo systemctl enable docker
         sudo systemctl start docker
     fi"
@@ -227,7 +257,7 @@ log_info "Creating deployment directory..."
 ssh "$SERVER_USER@$SERVER_ADDRESS" "rm -rf Go-Docker && mkdir -p Go-Docker"
 
 log_info "Transferring project files..."
-scp -r "$REPO_NAME"/* "$SERVER_USER@$SERVER_ADDRESS:~/Go-Docker/" || { 
+scp -r "$PARENT_DIR/$REPO_NAME"/* "$SERVER_USER@$SERVER_ADDRESS:~/Go-Docker/" || { 
     log_error "File transfer failed"; 
     exit 4; 
 }
@@ -237,7 +267,6 @@ log_info "Building and deploying Docker container..."
 ssh "$SERVER_USER@$SERVER_ADDRESS" "
     cd Go-Docker
     
-    # Idempotent container management - stop and remove existing container
     if docker ps -q --filter name=hng13-devops-go-app | grep -q .; then
         log_info 'Stopping existing container...'
         docker stop hng13-devops-go-app
@@ -248,13 +277,11 @@ ssh "$SERVER_USER@$SERVER_ADDRESS" "
         docker rm hng13-devops-go-app
     fi
     
-    # Remove existing image to ensure clean build
     if docker images -q hng13-devops-go-app | grep -q .; then
         log_info 'Removing existing image for clean build...'
         docker rmi hng13-devops-go-app 2>/dev/null || true
     fi
 
-    # Build and run new container
     echo 'Building new Docker image...'
     docker build -t hng13-devops-go-app .
     
@@ -268,10 +295,10 @@ log_success "Docker container deployed successfully"
 
 log_info "Validating Container Health..."
 log_info "Checking container status..."
-ssh "$SERVER_USER@$SERVER_ADDRESS" "docker ps -a --filter name=hng13-app --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+ssh "$SERVER_USER@$SERVER_ADDRESS" "echo \"\$(docker ps -a --filter name=hng13-devops-go-app --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}')\""
 
 log_info "Checking container logs..."
-ssh "$SERVER_USER@$SERVER_ADDRESS" "docker logs hng13-app --tail 20"
+ssh "$SERVER_USER@$SERVER_ADDRESS" "echo \"\$(docker logs hng13-devops-go-app)\""
 
 log_info "Testing application accessibility on port $APP_PORT..."
 ssh "$SERVER_USER@$SERVER_ADDRESS" "sleep 5 && curl -f -s http://localhost:$APP_PORT > /dev/null" || { 
@@ -331,7 +358,7 @@ ssh "$SERVER_USER@$SERVER_ADDRESS" "sudo systemctl is-active docker" || {
 }
 
 log_info "Verifying container health..."
-CONTAINER_STATUS=$(ssh "$SERVER_USER@$SERVER_ADDRESS" "docker inspect hng13-app --format '{{.State.Status}}'")
+CONTAINER_STATUS=$(ssh "$SERVER_USER@$SERVER_ADDRESS" "docker inspect hng13-devops-go-app --format '{{.State.Status}}'")
 if [ "$CONTAINER_STATUS" != "running" ]; then
     log_error "Container not running. Status: $CONTAINER_STATUS"
     exit 10
@@ -355,8 +382,7 @@ echo ""
 
 log_info "=========> Cleanup and Finalization..."
 echo "Sleeping for 1 minute to ensure all services stabilize..."
-sleep 60
-cleanup_deployment
+ssh "$SERVER_USER@$SERVER_ADDRESS" "sleep 60"
 
 echo ""
 echo "----------------"

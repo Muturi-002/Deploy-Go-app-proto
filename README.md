@@ -1,6 +1,6 @@
-# 🎯 Automated Docker Deployment Script
+# Automated Docker Deployment Script
 
-Stage 1 of the HNG13 Devops track.
+**Stage 1 of the HNG13 Devops track**
 
 The task given was to create a bash script file, `deploy.sh`, that will automate the setup, configuration and deployment of a Dockerized application of choice. These are the prerequisites required for this task.
 
@@ -77,11 +77,11 @@ Confirm that:
 - Gracefully stop/remove old containers before redeployment
 - Prevent duplicate Docker networks or Nginx configs
 - (Optional) Include a `--cleanup` flag to remove all deployed resources
-  **The optional part was not implemented**
 
+  **NOTE** Cleanup is important if you are executing the script again.
 
 ## Lessons learnt
-1. Remote connection to a Linux server. Check out this [link](https://medium.com/@martinmnjoroge03/ssh-remote-connection-potential-issue-47187a2a19a8) to see what I learnt when starting this task.
+1. Remote connection to a Linux server. Check out this [article](https://medium.com/@martinmnjoroge03/ssh-remote-connection-potential-issue-47187a2a19a8) to see what I learnt when starting this task.
 2. Creating logs and updating them through a bash script.
 3. Docker:
   - Reminded myself on how to build and run a containerized application. [Repo](https://github.com/Muturi-002/Go-docker-proto)
@@ -92,3 +92,4 @@ Confirm that:
   - Learnt how to configure a proxy to a container's port.
 6. GitHub
   - Generating a Personal Access Token
+7. Debugging script using log files
