@@ -25,6 +25,7 @@ log_success() {
 
 log_info "Starting deployment script. Log file: $LOG_FILE"
 
+DOCKER_CONTAINER_NAME="hng13-devops-go-app"
 # Cleanup function for removing all deployed resources
 cleanup_deployment() {
     log_info "=========> Starting cleanup process..."
@@ -36,9 +37,9 @@ cleanup_deployment() {
     
     log_info "Stopping and removing Docker containers..."
     ssh "$SERVER_USER@$SERVER_ADDRESS" "
-        docker stop hng13-devops-go-app 2>/dev/null || true
-        docker rm hng13-devops-go-app 2>/dev/null || true
-        docker rmi hng13-devops-go-app 2>/dev/null || true
+        docker stop $DOCKER_CONTAINER_NAME 2>/dev/null || true
+        docker rm $DOCKER_CONTAINER_NAME 2>/dev/null || true
+        docker rmi $DOCKER_CONTAINER_NAME 2>/dev/null || true
     " || log_error "Failed to cleanup Docker containers"
     
     log_info "Removing Nginx configuration..."
@@ -266,27 +267,27 @@ log_success "Project files transferred successfully"
 log_info "Building and deploying Docker container..."
 ssh "$SERVER_USER@$SERVER_ADDRESS" "
     cd Go-Docker
-    
-    if docker ps -q --filter name=hng13-devops-go-app | grep -q .; then
+
+    if docker ps -q --filter name="$DOCKER_CONTAINER_NAME" | grep -q .; then
         log_info 'Stopping existing container...'
-        docker stop hng13-devops-go-app
+        docker stop "$DOCKER_CONTAINER_NAME"
     fi
-    
-    if docker ps -aq --filter name=hng13-devops-go-app | grep -q .; then
+
+    if docker ps -aq --filter name="$DOCKER_CONTAINER_NAME" | grep -q .; then
         log_info 'Removing existing container...'
-        docker rm hng13-devops-go-app
+        docker rm "$DOCKER_CONTAINER_NAME"
     fi
-    
-    if docker images -q hng13-devops-go-app | grep -q .; then
+
+    if docker images -q "$DOCKER_CONTAINER_NAME" | grep -q .; then
         log_info 'Removing existing image for clean build...'
-        docker rmi hng13-devops-go-app 2>/dev/null || true
+        docker rmi "$DOCKER_CONTAINER_NAME" 2>/dev/null || true
     fi
 
     echo 'Building new Docker image...'
-    docker build -t hng13-devops-go-app .
-    
+    docker build -t "$DOCKER_CONTAINER_NAME" .
+
     echo 'Starting new container...'
-    docker run -d -p $APP_PORT:$APP_PORT --name hng13-devops-go-app --restart unless-stopped hng13-devops-go-app
+    docker run -d -p $APP_PORT:$APP_PORT --name "$DOCKER_CONTAINER_NAME" --restart unless-stopped "$DOCKER_CONTAINER_NAME"
 " || { 
     log_error "Docker deployment failed"; 
     exit 5; 
@@ -295,10 +296,10 @@ log_success "Docker container deployed successfully"
 
 log_info "Validating Container Health..."
 log_info "Checking container status..."
-ssh "$SERVER_USER@$SERVER_ADDRESS" "echo \"\$(docker ps -a --filter name=hng13-devops-go-app --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}')\""
+ssh "$SERVER_USER@$SERVER_ADDRESS" "echo \"\$(docker ps -a --filter name=$DOCKER_CONTAINER_NAME --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}')\""
 
 log_info "Checking container logs..."
-ssh "$SERVER_USER@$SERVER_ADDRESS" "echo \"\$(docker logs hng13-devops-go-app)\""
+ssh "$SERVER_USER@$SERVER_ADDRESS" "echo \"\$(docker logs $DOCKER_CONTAINER_NAME)\""
 
 log_info "Testing application accessibility on port $APP_PORT..."
 ssh "$SERVER_USER@$SERVER_ADDRESS" "sleep 5 && curl -f -s http://localhost:$APP_PORT > /dev/null" || { 
